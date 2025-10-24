@@ -34,7 +34,7 @@ function parseVendorPrefixedModel(modelStr) {
 
   // No recognized vendor prefix found
   return {
-    vendor: null,
+    vendor: 'ccr',
     baseModel: trimmed
   }
 }
