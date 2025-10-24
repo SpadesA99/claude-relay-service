@@ -182,9 +182,19 @@ class CcrRelayService {
 
       // 检查错误状态并相应处理
       if (response.status === 401) {
-        logger.warn(`🚫 Unauthorized error detected for CCR account ${accountId}`)
-        await ccrAccountService.markAccountUnauthorized(accountId)
-      } else if (response.status === 429) {
+          ccrAccountService.markAccountUnauthorized(accountId)
+      } else if (response.status === 402) {
+              ccrAccountService
+                .updateAccount(accountId, { schedulable: false })
+                .then(() => {
+                  logger.warn(
+                    `💸 Disabled scheduling for CCR account ${account?.name || accountId} after 402 response`
+                  )
+                })
+                .catch((err) => {
+                  logger.error('❗ Failed to disable scheduling after 402 response:', err)
+                })
+        } else if (response.status === 429) {
         logger.warn(`🚫 Rate limit detected for CCR account ${accountId}`)
         // 收到429先检查是否因为超过了手动配置的每日额度
         await ccrAccountService.checkQuotaUsage(accountId).catch((err) => {
