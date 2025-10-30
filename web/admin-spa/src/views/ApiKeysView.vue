@@ -138,11 +138,13 @@
                       v-model="searchKeyword"
                       class="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 pl-9 text-sm text-gray-700 placeholder-gray-400 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:placeholder-gray-500 dark:hover:border-gray-500"
                       :placeholder="
-                        searchMode === 'bindingAccount'
-                          ? '搜索所属账号...'
-                          : isLdapEnabled
-                            ? '搜索名称或所有者...'
-                            : '搜索名称...'
+                        searchMode === 'keyString'
+                          ? '搜索 API Key 字符串...'
+                          : searchMode === 'bindingAccount'
+                            ? '搜索所属账号...'
+                            : isLdapEnabled
+                              ? '搜索名称或所有者...'
+                              : '搜索名称...'
                       "
                       type="text"
                       @input="currentPage = 1"
@@ -2025,8 +2027,9 @@ const availableTags = ref([])
 
 // 搜索相关
 const searchKeyword = ref('')
-const searchMode = ref('apiKey')
+const searchMode = ref('keyString')
 const searchModeOptions = computed(() => [
+  { value: 'keyString', label: '按Key字符串', icon: 'fa-fingerprint' },
   { value: 'apiKey', label: '按Key名称', icon: 'fa-key' },
   { value: 'bindingAccount', label: '按所属账号', icon: 'fa-id-badge' }
 ])
@@ -2152,6 +2155,12 @@ const sortedApiKeys = computed(() => {
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase().trim()
     filteredKeys = filteredKeys.filter((key) => {
+      if (searchMode.value === 'keyString') {
+        // 搜索解密后的 API Key 字符串
+        const keyMatch = key.decryptedKey && key.decryptedKey.toLowerCase().includes(keyword)
+        return keyMatch
+      }
+
       if (searchMode.value === 'bindingAccount') {
         const bindings = getBindingDisplayStrings(key)
         if (bindings.length === 0) return false

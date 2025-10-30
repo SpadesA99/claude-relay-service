@@ -507,8 +507,20 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // 为每个API Key添加owner的displayName
+    // 为每个API Key添加owner的displayName和解密原始Key（供管理面板搜索使用）
     for (const apiKey of apiKeys) {
+      // 解密原始 API Key（如果存在）
+      if (apiKey.originalKey) {
+        try {
+          apiKey.decryptedKey = apiKeyService._decryptSensitiveData(apiKey.originalKey)
+        } catch (error) {
+          logger.debug(`无法解密 API Key ${apiKey.id}:`, error)
+          apiKey.decryptedKey = ''
+        }
+      } else {
+        apiKey.decryptedKey = ''
+      }
+
       // 如果API Key有关联的用户ID，获取用户信息
       if (apiKey.userId) {
         try {

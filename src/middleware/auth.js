@@ -476,27 +476,69 @@ const authenticateApiKey = async (req, res, next) => {
       const dailyCost = validation.keyData.dailyCost || 0
 
       if (dailyCost >= dailyCostLimit) {
-        logger.security(
-          `💰 Daily cost limit exceeded for key: ${validation.keyData.id} (${
-            validation.keyData.name
-          }), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
-        )
+        // 检查是否启用 CCR 故障转移
+        const enableCcrFallback = validation.keyData.enableCcrFallback !== false
 
-        return res.status(429).json({
-          error: 'Daily cost limit exceeded',
-          message: `已达到每日费用限制 ($${dailyCostLimit})`,
-          currentCost: dailyCost,
-          costLimit: dailyCostLimit,
-          resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString() // 明天0点重置
-        })
+        if (enableCcrFallback) {
+          // 启用 CCR 故障转移，设置标志并继续处理
+          logger.info(
+            `🔄 API Key ${validation.keyData.id} (${validation.keyData.name}) exceeded daily limit, enabling CCR fallback. Cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
+          )
+          req.useCcrFallback = true
+
+          // 检查今天是否已经发送过 CCR 通知
+          const hasNotifiedToday = await redis.hasSentCcrNotificationToday(validation.keyData.id)
+          if (!hasNotifiedToday) {
+            // 首次触发，设置通知标志和消息（包含当前使用额度）
+            req.ccrFallbackNotification = true
+            req.ccrNotificationMessage = `今日 claude code 额度已用完（已使用 $${dailyCost.toFixed(2)}/$${dailyCostLimit.toFixed(2)}），将为您切换到免费的 qwen3-coder-plus 480b 模型，您可以继续使用。`
+
+            // 标记今天已发送通知（会在今天结束时自动过期）
+            await redis.markCcrNotificationSent(validation.keyData.id)
+
+            logger.info(
+              `📢 CCR fallback notification set for key: ${validation.keyData.id} (${validation.keyData.name}) - First time today`
+            )
+
+            return res.status(400).json({
+              error: 'Daily cost limit exceeded',
+              message: req.ccrNotificationMessage,
+              currentCost: dailyCost,
+              costLimit: dailyCostLimit,
+              resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString() // 明天0点重置
+            })
+          } else {
+            logger.debug(
+              `🔕 CCR fallback notification skipped for key: ${validation.keyData.id} (${validation.keyData.name}) - Already notified today`
+            )
+          }
+          // 不返回错误，继续处理请求
+        } else {
+          // 未启用 CCR 故障转移，返回错误
+          logger.security(
+            `💰 Daily cost limit exceeded for key: ${validation.keyData.id} (${
+              validation.keyData.name
+            }), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
+          )
+
+          return res.status(429).json({
+            error: 'Daily cost limit exceeded',
+            message: `已达到每日费用限制 ($${dailyCostLimit})`,
+            currentCost: dailyCost,
+            costLimit: dailyCostLimit,
+            resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString() // 明天0点重置
+          })
+        }
       }
 
-      // 记录当前费用使用情况
-      logger.api(
-        `💰 Cost usage for key: ${validation.keyData.id} (${
-          validation.keyData.name
-        }), current: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
-      )
+      // 记录当前费用使用情况（未达到限制时）
+      if (dailyCost < dailyCostLimit) {
+        logger.api(
+          `💰 Cost usage for key: ${validation.keyData.id} (${
+            validation.keyData.name
+          }), current: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
+        )
+      }
     }
 
     // 检查总费用限制

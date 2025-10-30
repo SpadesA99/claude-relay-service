@@ -2021,6 +2021,46 @@ redisClient.releaseAccountLock = async function (lockKey, lockValue) {
   }
 }
 
+// 🔔 CCR 故障转移通知状态管理
+redisClient.hasSentCcrNotificationToday = async function (keyId) {
+  try {
+    const today = getDateStringInTimezone()
+    const notificationKey = `ccr_notification:${keyId}:${today}`
+    const value = await this.client.get(notificationKey)
+    return value === '1'
+  } catch (error) {
+    logger.error(`Failed to check CCR notification status for ${keyId}:`, error)
+    return false // 发生错误时默认未发送，确保通知能发出
+  }
+}
+
+redisClient.markCcrNotificationSent = async function (keyId) {
+  try {
+    const today = getDateStringInTimezone()
+    const notificationKey = `ccr_notification:${keyId}:${today}`
+
+    // 计算到今天结束的秒数
+    const now = new Date()
+    const tzDate = getDateInTimezone(now)
+    const endOfDay = new Date(
+      Date.UTC(tzDate.getUTCFullYear(), tzDate.getUTCMonth(), tzDate.getUTCDate(), 23, 59, 59)
+    )
+    // 还原时区偏移
+    const offset = config.system.timezoneOffset || 8
+    const offsetMs = offset * 3600000
+    const endOfDayUTC = new Date(endOfDay.getTime() - offsetMs)
+    const ttlSeconds = Math.max(Math.floor((endOfDayUTC.getTime() - now.getTime()) / 1000), 60) // 至少60秒
+
+    // 设置标志，并在今天结束时自动过期
+    await this.client.set(notificationKey, '1', 'EX', ttlSeconds)
+    logger.info(`📢 Marked CCR notification sent for key ${keyId} on ${today}, TTL: ${ttlSeconds}s`)
+    return true
+  } catch (error) {
+    logger.error(`Failed to mark CCR notification sent for ${keyId}:`, error)
+    return false
+  }
+}
+
 // 导出时区辅助函数
 redisClient.getDateInTimezone = getDateInTimezone
 redisClient.getDateStringInTimezone = getDateStringInTimezone

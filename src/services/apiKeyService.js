@@ -64,6 +64,9 @@ function sanitizeAccountIdForType(accountId, accountType) {
 class ApiKeyService {
   constructor() {
     this.prefix = config.security.apiKeyPrefix
+    // 🔐 加密配置
+    this.ENCRYPTION_SALT = 'claude-relay-apikey-salt-v1'
+    this._encryptionKeyCache = null
   }
 
   // 🔑 生成新的API Key
@@ -97,19 +100,22 @@ class ApiKeyService {
       activationDays = 0, // 新增：激活后有效天数（0表示不使用此功能）
       activationUnit = 'days', // 新增：激活时间单位 'hours' 或 'days'
       expirationMode = 'fixed', // 新增：过期模式 'fixed'(固定时间) 或 'activation'(首次使用后激活)
-      icon = '' // 新增：图标（base64编码）
+      icon = '', // 新增：图标（base64编码）
+      enableCcrFallback = true // 新增：启用 CCR 故障转移（默认 true）
     } = options
 
     // 生成简单的API Key (64字符十六进制)
     const apiKey = `${this.prefix}${this._generateSecretKey()}`
     const keyId = uuidv4()
     const hashedKey = this._hashApiKey(apiKey)
+    const encryptedKey = this._encryptSensitiveData(apiKey)
 
     const keyData = {
       id: keyId,
       name,
       description,
       apiKey: hashedKey,
+      originalKey: encryptedKey, // 存储加密的原始 API Key，供管理面板搜索使用
       tokenLimit: String(tokenLimit ?? 0),
       concurrencyLimit: String(concurrencyLimit ?? 0),
       rateLimitWindow: String(rateLimitWindow ?? 0),
@@ -143,7 +149,8 @@ class ApiKeyService {
       createdBy: options.createdBy || 'admin',
       userId: options.userId || '',
       userUsername: options.userUsername || '',
-      icon: icon || '' // 新增：图标（base64编码）
+      icon: icon || '', // 新增：图标（base64编码）
+      enableCcrFallback: String(enableCcrFallback !== false) // 新增：启用 CCR 故障转移（默认 true）
     }
 
     // 保存API Key数据并建立哈希映射
@@ -185,7 +192,8 @@ class ApiKeyService {
       activatedAt: keyData.activatedAt,
       createdAt: keyData.createdAt,
       expiresAt: keyData.expiresAt,
-      createdBy: keyData.createdBy
+      createdBy: keyData.createdBy,
+      enableCcrFallback: keyData.enableCcrFallback !== 'false' // 新增：启用 CCR 故障转移
     }
   }
 
@@ -302,6 +310,10 @@ class ApiKeyService {
         tags = []
       }
 
+      // 运行时默认值处理：如果字段不存在，默认为 true
+      const enableCcrFallback =
+        keyData.enableCcrFallback === undefined ? true : keyData.enableCcrFallback !== 'false'
+
       return {
         valid: true,
         keyData: {
@@ -334,7 +346,8 @@ class ApiKeyService {
           totalCost,
           weeklyOpusCost: (await redis.getWeeklyOpusCost(keyData.id)) || 0,
           tags,
-          usage
+          usage,
+          enableCcrFallback // 新增：启用 CCR 故障转移（运行时默认值：true）
         }
       }
     } catch (error) {
@@ -1406,6 +1419,70 @@ class ApiKeyService {
       .createHash('sha256')
       .update(apiKey + config.security.encryptionKey)
       .digest('hex')
+  }
+
+  // 🔐 加密敏感数据（用于存储原始 API Key）
+  _encryptSensitiveData(data) {
+    if (!data) {
+      return ''
+    }
+
+    try {
+      const key = this._getDerivedKey()
+      const iv = crypto.randomBytes(16)
+      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv)
+
+      let encrypted = cipher.update(data, 'utf8', 'hex')
+      encrypted += cipher.final('hex')
+
+      // 返回格式: iv:encryptedData
+      return `${iv.toString('hex')}:${encrypted}`
+    } catch (error) {
+      logger.error('❌ Failed to encrypt API key data:', error.message)
+      return ''
+    }
+  }
+
+  // 🔓 解密敏感数据（用于读取原始 API Key）
+  _decryptSensitiveData(encryptedData) {
+    if (!encryptedData) {
+      return ''
+    }
+
+    try {
+      const key = this._getDerivedKey()
+      const parts = encryptedData.split(':')
+
+      if (parts.length === 2) {
+        // 新格式: iv:encryptedData
+        const iv = Buffer.from(parts[0], 'hex')
+        const encryptedText = parts[1]
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv)
+
+        let decrypted = decipher.update(encryptedText, 'hex', 'utf8')
+        decrypted += decipher.final('utf8')
+
+        return decrypted
+      }
+
+      return ''
+    } catch (error) {
+      logger.error('❌ Failed to decrypt API key data:', error.message)
+      return ''
+    }
+  }
+
+  // 🔑 获取派生加密密钥（使用缓存提高性能）
+  _getDerivedKey() {
+    if (!this._encryptionKeyCache) {
+      this._encryptionKeyCache = crypto.scryptSync(
+        config.security.encryptionKey,
+        this.ENCRYPTION_SALT,
+        32
+      )
+      logger.info('🔑 API Key encryption key derived and cached')
+    }
+    return this._encryptionKeyCache
   }
 
   // 📈 获取使用统计
