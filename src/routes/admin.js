@@ -589,6 +589,30 @@ router.get('/api-keys/tags', authenticateAdmin, async (req, res) => {
   }
 })
 
+// 根据明文API Key查找对应的API Key ID
+router.post('/api-keys/find-by-value', authenticateAdmin, async (req, res) => {
+  try {
+    const { apiKeyValue } = req.body
+
+    if (!apiKeyValue || typeof apiKeyValue !== 'string') {
+      return res.status(400).json({ error: 'API key value is required and must be a string' })
+    }
+
+    // 使用apiKeyService的验证方法来查找API Key
+    const result = await apiKeyService.validateApiKey(apiKeyValue)
+
+    if (!result.valid || !result.keyData) {
+      return res.json({ success: true, data: null })
+    }
+
+    // 返回找到的API Key ID
+    return res.json({ success: true, data: { id: result.keyData.id } })
+  } catch (error) {
+    logger.error('❌ Failed to find API key by value:', error)
+    return res.status(500).json({ error: 'Failed to find API key', message: error.message })
+  }
+})
+
 // 创建新的API Key
 router.post('/api-keys', authenticateAdmin, async (req, res) => {
   try {

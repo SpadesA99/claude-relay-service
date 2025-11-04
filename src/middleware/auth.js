@@ -482,13 +482,45 @@ const authenticateApiKey = async (req, res, next) => {
           }), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
         )
 
-        return res.status(429).json({
-          error: 'Daily cost limit exceeded',
-          message: `已达到每日费用限制 ($${dailyCostLimit})`,
-          currentCost: dailyCost,
-          costLimit: dailyCostLimit,
-          resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString() // 明天0点重置
-        })
+        // 检查是否首次达到每日费用限制
+        const firstTimeNotifiedKey = `daily_cost_limit_notified:${validation.keyData.id}:${new Date().toISOString().split('T')[0]}`
+        const isFirstTime = !(await redis.getClient().get(firstTimeNotifiedKey))
+
+        if (isFirstTime) {
+          // 首次达到限制，设置标记（明天0点自动过期）
+          const now = new Date()
+          const tomorrow = new Date(now.setHours(24, 0, 0, 0))
+          const ttlSeconds = Math.floor((tomorrow - Date.now()) / 1000)
+          await redis.getClient().set(firstTimeNotifiedKey, '1', 'EX', ttlSeconds)
+
+          logger.info(
+            `🔄 First time daily cost limit reached for key: ${validation.keyData.id}, returning notification error`
+          )
+
+          // 首次达到限制，返回特殊错误提示
+          return res.status(500).json({
+            error: 'Daily cost limit exceeded',
+            message: '已达到每日费用限制，系统将切换到 glm-4.6 模型（不产生计费）',
+            currentCost: dailyCost,
+            costLimit: dailyCostLimit,
+            resetAt: new Date(new Date().setHours(24, 0, 0, 0)).toISOString(), // 明天0点重置
+            switchToFreeModel: true
+          })
+        }
+
+        // 非首次，直接切换模型并继续处理
+        logger.info(
+          `🔄 Daily cost limit already notified, switching to glm-4.6 for key: ${validation.keyData.id}`
+        )
+
+        // 修改请求体中的模型为 glm-4.6（通过 ccr 前缀路由）
+        if (req.body && req.body.model) {
+          const originalModel = req.body.model
+          req.body.model = 'ccr,claude'
+          logger.info(
+            `🔄 Model switched from ${originalModel} to glm-4.6 for key: ${validation.keyData.id}`
+          )
+        }
       }
 
       // 记录当前费用使用情况

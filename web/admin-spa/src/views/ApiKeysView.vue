@@ -138,11 +138,13 @@
                       v-model="searchKeyword"
                       class="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 pl-9 text-sm text-gray-700 placeholder-gray-400 shadow-sm transition-all duration-200 hover:border-gray-300 focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:placeholder-gray-500 dark:hover:border-gray-500"
                       :placeholder="
-                        searchMode === 'bindingAccount'
-                          ? '搜索所属账号...'
-                          : isLdapEnabled
-                            ? '搜索名称或所有者...'
-                            : '搜索名称...'
+                        searchMode === 'apiKeyValue'
+                          ? '输入完整的API Key...'
+                          : searchMode === 'bindingAccount'
+                            ? '搜索所属账号...'
+                            : isLdapEnabled
+                              ? '搜索名称或所有者...'
+                              : '搜索名称...'
                       "
                       type="text"
                       @input="currentPage = 1"
@@ -2026,8 +2028,10 @@ const availableTags = ref([])
 // 搜索相关
 const searchKeyword = ref('')
 const searchMode = ref('apiKey')
+const foundApiKeyId = ref(null) // 存储通过API Key值搜索找到的ID
 const searchModeOptions = computed(() => [
   { value: 'apiKey', label: '按Key名称', icon: 'fa-key' },
+  { value: 'apiKeyValue', label: '按API Key', icon: 'fa-fingerprint' },
   { value: 'bindingAccount', label: '按所属账号', icon: 'fa-id-badge' }
 ])
 
@@ -2152,6 +2156,11 @@ const sortedApiKeys = computed(() => {
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase().trim()
     filteredKeys = filteredKeys.filter((key) => {
+      if (searchMode.value === 'apiKeyValue') {
+        // 通过API Key值搜索：只显示匹配的那一个
+        return foundApiKeyId.value && key.id === foundApiKeyId.value
+      }
+
       if (searchMode.value === 'bindingAccount') {
         const bindings = getBindingDisplayStrings(key)
         if (bindings.length === 0) return false
@@ -4160,6 +4169,29 @@ watch(searchKeyword, () => {
 watch(searchMode, () => {
   currentPage.value = 1
   updateSelectAllState()
+  // 切换搜索模式时清空找到的API Key ID
+  foundApiKeyId.value = null
+})
+
+// 监听搜索关键词和模式，当使用API Key值搜索时调用后端API
+watch([searchKeyword, searchMode], async ([keyword, mode]) => {
+  if (mode === 'apiKeyValue' && keyword && keyword.trim()) {
+    try {
+      const response = await apiClient.post('/admin/api-keys/find-by-value', {
+        apiKeyValue: keyword.trim()
+      })
+      if (response.success && response.data) {
+        foundApiKeyId.value = response.data.id
+      } else {
+        foundApiKeyId.value = null
+      }
+    } catch (error) {
+      console.error('搜索API Key失败:', error)
+      foundApiKeyId.value = null
+    }
+  } else {
+    foundApiKeyId.value = null
+  }
 })
 
 // 监听分页变化，更新全选状态
