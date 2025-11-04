@@ -514,8 +514,8 @@ const authenticateApiKey = async (req, res, next) => {
 
         // 修改请求体中的模型为 glm-4.6（通过 ccr 前缀路由）
         if (req.body && req.body.model) {
-          const originalModel = req.body.model
-          req.body.model = 'ccr,claude'
+          const originalModel = 'ccr,' + req.body.model
+          req.body.model = originalModel
           logger.info(
             `🔄 Model switched from ${originalModel} to glm-4.6 for key: ${validation.keyData.id}`
           )
