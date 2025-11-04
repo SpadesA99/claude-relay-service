@@ -489,8 +489,10 @@ const authenticateApiKey = async (req, res, next) => {
         if (isFirstTime) {
           // 首次达到限制，设置标记（明天0点自动过期）
           const now = new Date()
-          const tomorrow = new Date(now.setHours(24, 0, 0, 0))
-          const ttlSeconds = Math.floor((tomorrow - Date.now()) / 1000)
+          const tomorrow = new Date()
+          tomorrow.setDate(tomorrow.getDate() + 1)
+          tomorrow.setHours(0, 0, 0, 0)
+          const ttlSeconds = Math.floor((tomorrow - now) / 1000)
           await redis.getClient().set(firstTimeNotifiedKey, '1', 'EX', ttlSeconds)
 
           logger.info(
@@ -498,8 +500,7 @@ const authenticateApiKey = async (req, res, next) => {
           )
 
           // 首次达到限制，返回特殊错误提示
-
-          return res.status(429).json({
+          return res.status(500).json({
             error: 'Daily cost limit exceeded',
             message: '已达到 claude code 模型每日费用限制，系统将切换到 glm-4.6 模型（不产生计费）',
             currentCost: totalCost,
