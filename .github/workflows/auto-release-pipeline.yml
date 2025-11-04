@@ -3,7 +3,8 @@ name: Auto Release Pipeline
 on:
   push:
     branches:
-      - main
+      - custom  # 你的自定义分支，用于发布你的版本
+      # - main  # 如果需要也可以监听 main 分支（从原仓库同步的分支）
 
 permissions:
   contents: write
@@ -252,7 +253,7 @@ jobs:
       run: |
         DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
         if [ -z "$DOCKER_USERNAME" ]; then
-          DOCKER_USERNAME="weishaw"
+          DOCKER_USERNAME="spadesa99"
         fi
 
         DOCKER_IMAGE=$(echo "${DOCKER_USERNAME}/claude-relay-service" | tr '[:upper:]' '[:lower:]')
