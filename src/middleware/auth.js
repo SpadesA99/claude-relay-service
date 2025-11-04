@@ -482,43 +482,67 @@ const authenticateApiKey = async (req, res, next) => {
           }), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
         )
 
-        // 检查是否首次达到每日费用限制
-        const firstTimeNotifiedKey = `daily_cost_limit_notified:${validation.keyData.id}:${new Date().toISOString().split('T')[0]}`
-        const isFirstTime = !(await redis.getClient().get(firstTimeNotifiedKey))
+        // 记录首次达到限制的时间戳（Redis key，明天0点自动过期）
+        const limitReachedKey = `daily_cost_limit_reached:${validation.keyData.id}:${new Date().toISOString().split('T')[0]}`
+        const limitReachedTime = await redis.getClient().get(limitReachedKey)
 
-        if (isFirstTime) {
-          // 首次达到限制，设置标记（明天0点自动过期）
-          const now = new Date()
-          const tomorrow = new Date()
-          tomorrow.setDate(tomorrow.getDate() + 1)
-          tomorrow.setHours(0, 0, 0, 0)
-          const ttlSeconds = Math.floor((tomorrow - now) / 1000)
-          await redis.getClient().set(firstTimeNotifiedKey, '1', 'EX', ttlSeconds)
+        const now = Date.now()
+        const tomorrow = new Date()
+        tomorrow.setDate(tomorrow.getDate() + 1)
+        tomorrow.setHours(0, 0, 0, 0)
+        const ttlSeconds = Math.floor((tomorrow - now) / 1000)
 
+        if (!limitReachedTime) {
+          // 首次达到限制，记录时间戳
+          await redis.getClient().set(limitReachedKey, now.toString(), 'EX', ttlSeconds)
           logger.info(
-            `🔄 First time daily cost limit reached for key: ${validation.keyData.id}, returning notification error`
+            `🔄 First time daily cost limit reached for key: ${validation.keyData.id}, starting 3-minute grace period`
           )
 
-          // 首次达到限制，返回特殊错误提示
-          return res.status(500).json({
+          // 前3分钟，返回429错误
+          return res.status(429).json({
             error: 'Daily cost limit exceeded',
-            message: '已达到 claude code 模型每日费用限制，系统将切换到 glm-4.6 模型（不产生计费）',
+            message:
+              '已达到每日费用限制，系统将在3分钟后自动切换到免费模型（glm-4.6），请稍后重试',
             currentCost: dailyCost,
-            costLimit: dailyCostLimit
+            costLimit: dailyCostLimit,
+            gracePeriodSeconds: 180,
+            retryAfter: 180
           })
         }
 
-        // 非首次，直接切换模型并继续处理
+        // 检查距离首次达到限制的时间
+        const elapsedSeconds = Math.floor((now - parseInt(limitReachedTime)) / 1000)
+        const gracePeriodSeconds = 180 // 3分钟
+
+        if (elapsedSeconds < gracePeriodSeconds) {
+          // 仍在3分钟宽限期内，返回429错误
+          const remainingSeconds = gracePeriodSeconds - elapsedSeconds
+          logger.info(
+            `🚫 Still in grace period for key: ${validation.keyData.id}, ${remainingSeconds}s remaining`
+          )
+
+          return res.status(429).json({
+            error: 'Daily cost limit exceeded',
+            message: `已达到每日费用限制，系统将在 ${remainingSeconds} 秒后自动切换到免费模型（glm-4.6）`,
+            currentCost: dailyCost,
+            costLimit: dailyCostLimit,
+            gracePeriodSeconds: remainingSeconds,
+            retryAfter: remainingSeconds
+          })
+        }
+
+        // 超过3分钟，自动切换到CCR免费模型
         logger.info(
-          `🔄 Daily cost limit already notified, switching to glm-4.6 for key: ${validation.keyData.id}`
+          `🔄 Grace period expired, switching to glm-4.6 for key: ${validation.keyData.id}`
         )
 
         // 修改请求体中的模型为 glm-4.6（通过 ccr 前缀路由）
         if (req.body && req.body.model) {
-          const originalModel = 'ccr,' + req.body.model
-          req.body.model = originalModel
+          const originalModel = req.body.model
+          req.body.model = 'ccr,' + originalModel
           logger.info(
-            `🔄 Model switched from ${originalModel} to glm-4.6 for key: ${validation.keyData.id}`
+            `🔄 Model switched from ${originalModel} to ccr,${originalModel} (glm-4.6) for key: ${validation.keyData.id}`
           )
         }
       }
