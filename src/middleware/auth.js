@@ -503,8 +503,8 @@ const authenticateApiKey = async (req, res, next) => {
           return res.status(500).json({
             error: 'Daily cost limit exceeded',
             message: '已达到 claude code 模型每日费用限制，系统将切换到 glm-4.6 模型（不产生计费）',
-            currentCost: totalCost,
-            costLimit: totalCostLimit
+            currentCost: dailyCost,
+            costLimit: dailyCostLimit
           })
         }
 
