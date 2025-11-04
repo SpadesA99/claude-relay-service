@@ -229,8 +229,7 @@ const authenticateApiKey = async (req, res, next) => {
         // 如果超过限制，立即减少计数
         await redis.decrConcurrency(validation.keyData.id, requestId)
         logger.security(
-          `🚦 Concurrency limit exceeded for key: ${validation.keyData.id} (${
-            validation.keyData.name
+          `🚦 Concurrency limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name
           }), current: ${currentConcurrency - 1}, limit: ${concurrencyLimit}`
         )
         return res.status(429).json({
@@ -435,8 +434,7 @@ const authenticateApiKey = async (req, res, next) => {
           const remainingMinutes = Math.ceil((resetTime - now) / 60000)
 
           logger.security(
-            `💰 Rate limit exceeded (cost) for key: ${validation.keyData.id} (${
-              validation.keyData.name
+            `💰 Rate limit exceeded (cost) for key: ${validation.keyData.id} (${validation.keyData.name
             }), cost: $${currentCost.toFixed(2)}/$${rateLimitCost}`
           )
 
@@ -477,8 +475,7 @@ const authenticateApiKey = async (req, res, next) => {
 
       if (dailyCost >= dailyCostLimit) {
         logger.security(
-          `💰 Daily cost limit exceeded for key: ${validation.keyData.id} (${
-            validation.keyData.name
+          `💰 Daily cost limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name
           }), cost: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
         )
 
@@ -496,27 +493,27 @@ const authenticateApiKey = async (req, res, next) => {
           // 首次达到限制，记录时间戳
           await redis.getClient().set(limitReachedKey, now.toString(), 'EX', ttlSeconds)
           logger.info(
-            `🔄 First time daily cost limit reached for key: ${validation.keyData.id}, starting 3-minute grace period`
+            `🔄 First time daily cost limit reached for key: ${validation.keyData.id}, starting 100-second grace period`
           )
 
-          // 前3分钟，返回429错误
+          // 前100秒，返回429错误，包含额度信息
           return res.status(429).json({
             error: 'Daily cost limit exceeded',
             message:
-              '已达到每日费用限制，系统将在3分钟后自动切换到免费模型（glm-4.6），请稍后重试',
+              `已达到每日费用限制：$${dailyCost.toFixed(2)}/$${dailyCostLimit.toFixed(2)}，系统将在100秒后自动切换到免费模型（glm-4.6），请稍后重试`,
             currentCost: dailyCost,
             costLimit: dailyCostLimit,
-            gracePeriodSeconds: 180,
-            retryAfter: 180
+            gracePeriodSeconds: 100,
+            retryAfter: 100
           })
         }
 
         // 检查距离首次达到限制的时间
         const elapsedSeconds = Math.floor((now - parseInt(limitReachedTime)) / 1000)
-        const gracePeriodSeconds = 180 // 3分钟
+        const gracePeriodSeconds = 100 // 100秒
 
         if (elapsedSeconds < gracePeriodSeconds) {
-          // 仍在3分钟宽限期内，返回429错误
+          // 仍在100秒宽限期内，返回429错误
           const remainingSeconds = gracePeriodSeconds - elapsedSeconds
           logger.info(
             `🚫 Still in grace period for key: ${validation.keyData.id}, ${remainingSeconds}s remaining`
@@ -524,7 +521,7 @@ const authenticateApiKey = async (req, res, next) => {
 
           return res.status(429).json({
             error: 'Daily cost limit exceeded',
-            message: `已达到每日费用限制，系统将在 ${remainingSeconds} 秒后自动切换到免费模型（glm-4.6）`,
+            message: `已达到每日费用限制：$${dailyCost.toFixed(2)}/$${dailyCostLimit.toFixed(2)}，系统将在 ${remainingSeconds} 秒后自动切换到免费模型（glm-4.6）`,
             currentCost: dailyCost,
             costLimit: dailyCostLimit,
             gracePeriodSeconds: remainingSeconds,
@@ -532,25 +529,15 @@ const authenticateApiKey = async (req, res, next) => {
           })
         }
 
-        // 超过3分钟，自动切换到CCR免费模型
-        logger.info(
-          `🔄 Grace period expired, switching to glm-4.6 for key: ${validation.keyData.id}`
-        )
-
-        // 修改请求体中的模型为 glm-4.6（通过 ccr 前缀路由）
         if (req.body && req.body.model) {
           const originalModel = req.body.model
           req.body.model = 'ccr,' + originalModel
-          logger.info(
-            `🔄 Model switched from ${originalModel} to ccr,${originalModel} (glm-4.6) for key: ${validation.keyData.id}`
-          )
         }
       }
 
       // 记录当前费用使用情况
       logger.api(
-        `💰 Cost usage for key: ${validation.keyData.id} (${
-          validation.keyData.name
+        `💰 Cost usage for key: ${validation.keyData.id} (${validation.keyData.name
         }), current: $${dailyCost.toFixed(2)}/$${dailyCostLimit}`
       )
     }
@@ -562,8 +549,7 @@ const authenticateApiKey = async (req, res, next) => {
 
       if (totalCost >= totalCostLimit) {
         logger.security(
-          `💰 Total cost limit exceeded for key: ${validation.keyData.id} (${
-            validation.keyData.name
+          `💰 Total cost limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name
           }), cost: $${totalCost.toFixed(2)}/$${totalCostLimit}`
         )
 
@@ -576,8 +562,7 @@ const authenticateApiKey = async (req, res, next) => {
       }
 
       logger.api(
-        `💰 Total cost usage for key: ${validation.keyData.id} (${
-          validation.keyData.name
+        `💰 Total cost usage for key: ${validation.keyData.id} (${validation.keyData.name
         }), current: $${totalCost.toFixed(2)}/$${totalCostLimit}`
       )
     }
@@ -595,8 +580,7 @@ const authenticateApiKey = async (req, res, next) => {
 
         if (weeklyOpusCost >= weeklyOpusCostLimit) {
           logger.security(
-            `💰 Weekly Opus cost limit exceeded for key: ${validation.keyData.id} (${
-              validation.keyData.name
+            `💰 Weekly Opus cost limit exceeded for key: ${validation.keyData.id} (${validation.keyData.name
             }), cost: $${weeklyOpusCost.toFixed(2)}/$${weeklyOpusCostLimit}`
           )
 
@@ -619,8 +603,7 @@ const authenticateApiKey = async (req, res, next) => {
 
         // 记录当前 Opus 费用使用情况
         logger.api(
-          `💰 Opus weekly cost usage for key: ${validation.keyData.id} (${
-            validation.keyData.name
+          `💰 Opus weekly cost usage for key: ${validation.keyData.id} (${validation.keyData.name
           }), current: $${weeklyOpusCost.toFixed(2)}/$${weeklyOpusCostLimit}`
         )
       }
